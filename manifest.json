@@ -1,0 +1,32 @@
+{
+  "name": "FitFuel Pro",
+  "short_name": "FitFuel",
+  "description": "Vegetarian meal plans, daily workouts & progress tracking \u2014 personalised for your body goals.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": [
+    "health",
+    "fitness",
+    "food"
+  ],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}

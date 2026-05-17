@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <!-- Dumbbell bar -->
+  <rect x="176" y="236" width="160" height="40" rx="8" fill="white"/>
+  <!-- Left weight plate -->
+  <rect x="108" y="176" width="76" height="160" rx="18" fill="white"/>
+  <!-- Right weight plate -->
+  <rect x="328" y="176" width="76" height="160" rx="18" fill="white"/>
+  <!-- Left collar -->
+  <rect x="80" y="200" width="36" height="112" rx="18" fill="rgba(255,255,255,0.55)"/>
+  <!-- Right collar -->
+  <rect x="396" y="200" width="36" height="112" rx="18" fill="rgba(255,255,255,0.55)"/>
+  <!-- Accent dot top-right -->
+  <circle cx="390" cy="122" r="28" fill="rgba(255,255,255,0.18)"/>
+  <circle cx="390" cy="122" r="14" fill="rgba(255,255,255,0.35)"/>
+</svg>
