@@ -157,22 +157,22 @@ function calcTargets(profile, dayType) {
     ? 10 * weight + 6.25 * height - 5 * age + 5
     : 10 * weight + 6.25 * height - 5 * age - 161;
   const actMult = { sedentary:1.2, light:1.375, moderate:1.55, active:1.725, very_active:1.9 }[profile.activityLevel||'moderate'] || 1.55;
-  const tdee = {
-    football: bmr * 1.75,
-    gym: bmr * actMult,
-    rest: bmr * (actMult - 0.2),
-    active: bmr * 1.4,
-  }[dayType] || bmr * actMult;
-  const goalAdj = { lose_fat: -400, build_muscle: 200, fitness: -150, maintain: 0 }[profile.goal||'lose_fat'] || -400;
-  const cal = Math.round(tdee + goalAdj);
-  const protein = Math.round(weight * 2.2);
+  const tdee = { football: bmr * 1.75, gym: bmr * actMult, rest: bmr * (actMult - 0.2), active: bmr * 1.4 }[dayType] || bmr * actMult;
+  const goals = profile.goals || (profile.goal ? [profile.goal] : ['lose_fat']);
+  const goalAdjs = { lose_fat:-400, build_muscle:200, improve_fitness:-150, increase_stamina:0, flexibility:0, stress_relief:0, maintain:0 };
+  const totalAdj = goals.length ? goals.reduce((s,g) => s + (goalAdjs[g]||0), 0) / goals.length : -400;
+  const hasMuscle = goals.includes('build_muscle');
+  const cal = Math.round(tdee + totalAdj);
+  const protein = Math.round(weight * (hasMuscle ? 2.5 : 2.2));
   const fat = Math.round((cal * 0.28) / 9);
   const carbs = Math.round((cal - protein * 4 - fat * 9) / 4);
-  return { calories: Math.max(cal, 1200), protein, carbs, fat };
+  return { calories: Math.max(cal, 1200), protein, carbs: Math.max(carbs, 0), fat };
 }
 
 function getDayType(profile, dayIdx) {
   const dayName = DAY_NAMES[dayIdx].toLowerCase();
+  const sports = profile.sports || [];
+  if (sports.some(s => (s.days||[]).includes(dayName))) return 'football';
   if (profile.sportsDays?.includes(dayName) && (profile.sportsPlayed||[]).length > 0) return 'football';
   if (profile.gymDays?.includes(dayName)) return 'gym';
   if (['active','very_active'].includes(profile.activityLevel)) return 'active';
@@ -1860,12 +1860,10 @@ const WORKOUT_SCHEDULE = {
 // ── Default Profile ───────────────────────────────────────────────────────
 const DEFAULT_PROFILE = {
   name:'', age:'', weight:'', height:'', bodyFat:'', targetBodyFat:'',
-  gender:'male', goal:'lose_fat',
+  gender:'male', goals:['lose_fat'],
   diet:'vegetarian',
   allergies:[],
-  sportsPlayed:[],
-  sportsDays:[],
-  sportsTime:'19:00',
+  sports:[],
   gymDays:[],
   activityLevel:'moderate',
   wakeTime:'06:30',
@@ -2019,10 +2017,11 @@ function ProfileSetup({ onComplete }) {
           </div>
         </div>
         <div style={{marginBottom:8}}>
-          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Goal</label>
+          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Your Goals</label>
+          <p style={{fontSize:11,color:'#555',marginTop:4,marginBottom:8}}>Pick all that apply</p>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-            {[['lose_fat','Lose Fat 🔥'],['build_muscle','Build Muscle 💪'],['fitness','Get Fitter 🏃'],['maintain','Maintain ⚖️']].map(([v,l])=>(
-              <ChipBtn key={v} active={form.goal===v} onClick={()=>up('goal',v)}>{l}</ChipBtn>
+            {[['lose_fat','Lose Fat 🔥'],['build_muscle','Build Muscle 💪'],['improve_fitness','Get Fitter 🏃'],['increase_stamina','More Stamina ⚡'],['flexibility','Flexibility 🧘'],['maintain','Maintain ⚖️']].map(([v,l])=>(
+              <ChipBtn key={v} active={(form.goals||[]).includes(v)} onClick={()=>toggleArr('goals',v)}>{l}</ChipBtn>
             ))}
           </div>
         </div>
@@ -2052,14 +2051,41 @@ function ProfileSetup({ onComplete }) {
           </div>
         </div>
         <div style={{marginBottom:16}}>
-          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:6}}>Current Body Fat %</label>
-          <input className="input-field" type="number" step="0.5" placeholder="e.g. 22" value={form.bodyFat}
-            onChange={e=>up('bodyFat',e.target.value)}/>
-          <p style={{fontSize:11,color:'#555',marginTop:4}}>Don't know? Use Body Fat Calculator in Progress tab</p>
+          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Body Fat % <span style={{color:'#555'}}>(optional)</span></label>
+          <div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}}>
+            {[['know','I know it ✏️'],['estimate','Estimate 🧮'],['skip','Skip']].map(([v,l])=>(
+              <ChipBtn key={v} active={(form._bfMode||'skip')===v} onClick={()=>up('_bfMode',v)}>{l}</ChipBtn>
+            ))}
+          </div>
+          {(form._bfMode||'skip')==='know' && (
+            <input className="input-field" type="number" step="0.5" placeholder="e.g. 22" value={form.bodyFat}
+              onChange={e=>up('bodyFat',e.target.value)}/>
+          )}
+          {(form._bfMode||'skip')==='estimate' && (() => {
+            const w = +form.weight, h = +form.height/100, a = +form.age||25;
+            if (!w || !h) return <p style={{fontSize:12,color:'#666',margin:0}}>Enter weight & height above first</p>;
+            const bmi = w/(h*h);
+            const bf = Math.round((1.2*bmi + 0.23*a - (form.gender==='male'?10.8:0) - 5.4)*10)/10;
+            const est = Math.max(bf, 5);
+            const classify = est < 14 ? 'Essential' : est < 21 ? 'Athletic' : est < 25 ? 'Fitness' : est < 32 ? 'Average' : 'High';
+            return <div style={{background:'#111',padding:14,borderRadius:12,border:'1px solid #2a2a2a'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div>
+                  <p style={{color:'#fff',margin:0,fontSize:20,fontWeight:700}}>{est}%</p>
+                  <p style={{color:'#888',fontSize:11,margin:'2px 0 0'}}>Estimated body fat — {classify}</p>
+                  <p style={{color:'#555',fontSize:10,margin:'4px 0 0'}}>Based on BMI (Deurenberg formula)</p>
+                </div>
+                <button onClick={()=>{up('bodyFat',est.toString());up('_bfMode','know');}}
+                  style={{background:'#ffffff',color:'#000',border:'none',borderRadius:10,padding:'8px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                  Use this
+                </button>
+              </div>
+            </div>;
+          })()}
         </div>
         <div style={{marginBottom:8}}>
-          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:6}}>Target Body Fat %</label>
-          <input className="input-field" type="number" step="0.5" placeholder="e.g. 15" value={form.targetBodyFat}
+          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:6}}>Target Body Fat % <span style={{color:'#555'}}>(optional)</span></label>
+          <input className="input-field" type="number" step="0.5" placeholder="e.g. 15 — leave blank if unsure" value={form.targetBodyFat}
             onChange={e=>up('targetBodyFat',e.target.value)}/>
         </div>
         <BtnRow onBack={()=>setStep(1)} onNext={()=>{
@@ -2101,33 +2127,48 @@ function ProfileSetup({ onComplete }) {
       <div style={{...card, overflowY:'auto', maxHeight:'90vh'}}>
         <Dots/>
         <h2 style={{fontSize:18,fontWeight:700,color:'#ffffff',marginBottom:20}}>Your Activity</h2>
-        <div style={{marginBottom:16}}>
-          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Sports Played</label>
+
+        {/* Sports Section */}
+        <div style={{marginBottom:20}}>
+          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Sports Played <span style={{color:'#555'}}>(pick all that apply)</span></label>
           <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-            {[['Football','⚽ Football'],['Cricket','🏏 Cricket'],['Basketball','🏀 Basketball'],['Badminton','🏸 Badminton'],['Tennis','🎾 Tennis'],['Swimming','🏊 Swimming'],['None','None']].map(([v,l])=>(
-              <ChipBtn key={v} active={(form.sportsPlayed||[]).includes(v)} onClick={()=>toggleArr('sportsPlayed',v)}>{l}</ChipBtn>
-            ))}
+            {[['Football','⚽'],['Cricket','🏏'],['Basketball','🏀'],['Badminton','🏸'],['Tennis','🎾'],['Swimming','🏊'],['Volleyball','🏐'],['Cycling','🚴'],['Running','🏃'],['Yoga','🧘'],['Martial Arts','🥋'],['Table Tennis','🏓']].map(([v,emoji])=>{
+              const active = (form.sports||[]).some(s=>s.name===v);
+              return <ChipBtn key={v} active={active} onClick={()=>{
+                setForm(f=>{
+                  const sp = [...(f.sports||[])];
+                  const idx = sp.findIndex(s=>s.name===v);
+                  if (idx>=0) return {...f, sports:sp.filter(s=>s.name!==v)};
+                  return {...f, sports:[...sp,{name:v,days:[],time:'18:00'}]};
+                });
+              }}>{emoji} {v}</ChipBtn>;
+            })}
           </div>
         </div>
-        {(form.sportsPlayed||[]).length > 0 && !(form.sportsPlayed||[]).includes('None') && (
-          <>
-            <div style={{marginBottom:12}}>
-              <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Sports Days</label>
-              <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-                {['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].map(d=>(
-                  <ChipBtn key={d} active={(form.sportsDays||[]).includes(d)} onClick={()=>toggleArr('sportsDays',d)}>{d.slice(0,3).charAt(0).toUpperCase()+d.slice(1,3)}</ChipBtn>
-                ))}
-              </div>
+
+        {/* Per-sport day pickers */}
+        {(form.sports||[]).map((sport,si)=>(
+          <div key={sport.name} style={{background:'#111',borderRadius:14,padding:14,marginBottom:12,border:'1px solid #2a2a2a'}}>
+            <p style={{color:'#fff',fontWeight:700,margin:'0 0 10px',fontSize:14}}>{sport.name} — Which days?</p>
+            <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:10}}>
+              {['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].map(d=>{
+                const active=(sport.days||[]).includes(d);
+                return <ChipBtn key={d} active={active} onClick={()=>{
+                  setForm(f=>({...f,sports:f.sports.map((s,i)=>i!==si?s:{...s,days:active?s.days.filter(x=>x!==d):[...s.days,d]})}));
+                }}>{d.slice(0,3).charAt(0).toUpperCase()+d.slice(1,3)}</ChipBtn>;
+              })}
             </div>
-            <div style={{marginBottom:16}}>
-              <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:6}}>Sports Time</label>
-              <input className="input-field" type="time" value={form.sportsTime||'19:00'}
-                onChange={e=>up('sportsTime',e.target.value)}/>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <label style={{fontSize:11,color:'#888',flexShrink:0}}>Time:</label>
+              <input className="input-field" type="time" value={sport.time||'18:00'} style={{flex:1}}
+                onChange={e=>setForm(f=>({...f,sports:f.sports.map((s,i)=>i!==si?s:{...s,time:e.target.value})}))}/>
             </div>
-          </>
-        )}
+          </div>
+        ))}
+
+        {/* Gym Days */}
         <div style={{marginBottom:16}}>
-          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Gym Training Days</label>
+          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Gym / Weight Training Days</label>
           <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
             {['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].map(d=>(
               <ChipBtn key={d} active={(form.gymDays||[]).includes(d)} onClick={()=>toggleArr('gymDays',d)}>{d.slice(0,3).charAt(0).toUpperCase()+d.slice(1,3)}</ChipBtn>
@@ -2135,8 +2176,10 @@ function ProfileSetup({ onComplete }) {
           </div>
           <p style={{fontSize:11,color:'#555',marginTop:4}}>Skip if you don't gym — that's okay!</p>
         </div>
+
+        {/* Activity Level */}
         <div style={{marginBottom:8}}>
-          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Activity Level</label>
+          <label style={{fontSize:12,color:'#a0a0a0',display:'block',marginBottom:8}}>Overall Activity Level</label>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
             {[['sedentary','Desk job 💻'],['light','Light 🚶'],['moderate','Moderate 🏃'],['very_active','Very Active 💪']].map(([v,l])=>(
               <ChipBtn key={v} active={form.activityLevel===v} onClick={()=>up('activityLevel',v)}>{l}</ChipBtn>
@@ -3028,6 +3071,110 @@ const FOOD_DB = [
   {name:'Green Chutney (2 tbsp)',cal:30,protein:1,carbs:4,fat:1},
   {name:'Tamarind Chutney (1 tbsp)',cal:40,protein:0,carbs:10,fat:0},
   {name:'Quinoa cooked (1 cup)',cal:222,protein:8,carbs:39,fat:4},
+  // More Indian foods
+  {name:'Aloo Gobi (1 cup)',cal:195,protein:5,carbs:28,fat:7},
+  {name:'Baingan Bharta (1 cup)',cal:160,protein:4,carbs:18,fat:8},
+  {name:'Dal Makhani (1 cup)',cal:320,protein:14,carbs:40,fat:12},
+  {name:'Kadhi Pakora (1 cup)',cal:230,protein:8,carbs:28,fat:10},
+  {name:'Mix Veg Curry (1 cup)',cal:175,protein:5,carbs:22,fat:7},
+  {name:'Paneer Paratha (1)',cal:310,protein:13,carbs:38,fat:12},
+  {name:'Methi Paratha (1)',cal:200,protein:5,carbs:32,fat:7},
+  {name:'Veg Pulao (1 cup)',cal:290,protein:6,carbs:52,fat:7},
+  {name:'Curd Rice (1 cup)',cal:240,protein:7,carbs:42,fat:5},
+  {name:'Lemon Rice (1 cup)',cal:270,protein:5,carbs:50,fat:6},
+  {name:'Tomato Rice (1 cup)',cal:260,protein:5,carbs:48,fat:6},
+  {name:'Veg Biryani (1 cup)',cal:350,protein:8,carbs:58,fat:10},
+  {name:'Egg Biryani (1 cup)',cal:400,protein:15,carbs:58,fat:12},
+  {name:'Chicken Biryani (1 cup)',cal:450,protein:22,carbs:55,fat:14},
+  {name:'Butter Chicken (1 cup)',cal:420,protein:28,carbs:12,fat:28},
+  {name:'Chicken Curry (1 cup)',cal:380,protein:30,carbs:10,fat:24},
+  {name:'Fish Curry (1 cup)',cal:290,protein:28,carbs:8,fat:16},
+  {name:'Mutton Curry (1 cup)',cal:480,protein:35,carbs:8,fat:34},
+  {name:'Prawn Masala (1 cup)',cal:270,protein:26,carbs:10,fat:14},
+  {name:'Keema Matar (1 cup)',cal:420,protein:32,carbs:16,fat:26},
+  {name:'Chapati with Dal (1 meal)',cal:350,protein:14,carbs:60,fat:7},
+  {name:'Veg Thali (full)',cal:650,protein:22,carbs:105,fat:18},
+  {name:'Halwa Puri (1 plate)',cal:580,protein:10,carbs:80,fat:26},
+  {name:'Misal Pav (1 plate)',cal:430,protein:14,carbs:68,fat:12},
+  {name:'Ragda Pattice (1 plate)',cal:390,protein:12,carbs:62,fat:11},
+  {name:'Vada Pav (1)',cal:290,protein:7,carbs:48,fat:9},
+  {name:'Medu Vada (2)',cal:240,protein:8,carbs:30,fat:11},
+  {name:'Rava Dosa (1)',cal:195,protein:5,carbs:34,fat:6},
+  {name:'Egg Dosa (1)',cal:260,protein:11,carbs:30,fat:11},
+  {name:'Pesarattu (2)',cal:210,protein:13,carbs:30,fat:5},
+  {name:'Appam (2)',cal:220,protein:5,carbs:44,fat:3},
+  {name:'Puttu & Kadala (1 plate)',cal:380,protein:14,carbs:68,fat:7},
+  {name:'Pongal (1 cup)',cal:300,protein:8,carbs:52,fat:8},
+  // Proteins
+  {name:'Chicken Breast (100g grilled)',cal:165,protein:31,carbs:0,fat:4},
+  {name:'Chicken Leg (1)',cal:230,protein:26,carbs:0,fat:13},
+  {name:'Boiled Chicken (100g)',cal:155,protein:30,carbs:0,fat:3},
+  {name:'Tuna (100g canned)',cal:116,protein:26,carbs:0,fat:1},
+  {name:'Salmon (100g)',cal:208,protein:22,carbs:0,fat:13},
+  {name:'Egg Bhurji (2 eggs)',cal:200,protein:14,carbs:3,fat:15},
+  {name:'Paneer (100g)',cal:265,protein:18,carbs:4,fat:20},
+  {name:'Tofu (100g)',cal:80,protein:8,carbs:2,fat:4},
+  {name:'Sprouts Salad (1 cup)',cal:100,protein:8,carbs:18,fat:1},
+  {name:'Moong Dal (1 cup cooked)',cal:212,protein:14,carbs:38,fat:1},
+  {name:'Chana Dal (1 cup cooked)',cal:270,protein:15,carbs:44,fat:4},
+  {name:'Masoor Dal (1 cup cooked)',cal:230,protein:18,carbs:40,fat:1},
+  {name:'Soya Chunks (50g dry)',cal:175,protein:26,carbs:12,fat:1},
+  {name:'Soya Milk (250ml)',cal:100,protein:7,carbs:8,fat:4},
+  // Breakfast options
+  {name:'Cornflakes (1 bowl)',cal:270,protein:7,carbs:56,fat:2},
+  {name:'Muesli (80g)',cal:300,protein:9,carbs:57,fat:5},
+  {name:'Granola (60g)',cal:280,protein:7,carbs:46,fat:8},
+  {name:'Avocado Toast (1 slice)',cal:200,protein:4,carbs:22,fat:11},
+  {name:'Smoothie Bowl',cal:340,protein:10,carbs:62,fat:7},
+  {name:'Pancakes (2)',cal:310,protein:8,carbs:54,fat:8},
+  {name:'French Toast (2 slices)',cal:290,protein:10,carbs:40,fat:11},
+  {name:'Boiled Eggs + Toast (2+1)',cal:320,protein:18,carbs:32,fat:12},
+  {name:'Milk (250ml full fat)',cal:150,protein:8,carbs:12,fat:8},
+  {name:'Milk (250ml skim)',cal:90,protein:9,carbs:13,fat:0},
+  {name:'Tea with milk (1 cup)',cal:40,protein:1,carbs:5,fat:1},
+  {name:'Coffee with milk (1 cup)',cal:60,protein:2,carbs:7,fat:2},
+  {name:'Black Coffee (1 cup)',cal:5,protein:0,carbs:1,fat:0},
+  {name:'Protein Coffee (1 cup)',cal:100,protein:15,carbs:5,fat:2},
+  // Fruits & veggies
+  {name:'Orange (1 medium)',cal:62,protein:1,carbs:15,fat:0},
+  {name:'Pomegranate (1 cup seeds)',cal:144,protein:3,carbs:33,fat:2},
+  {name:'Grapes (1 cup)',cal:104,protein:1,carbs:27,fat:0},
+  {name:'Watermelon (1 cup)',cal:46,protein:1,carbs:11,fat:0},
+  {name:'Guava (1 medium)',cal:68,protein:3,carbs:14,fat:1},
+  {name:'Dates (3 pieces)',cal:75,protein:1,carbs:20,fat:0},
+  {name:'Mixed Fruit Bowl (1 cup)',cal:120,protein:2,carbs:28,fat:1},
+  {name:'Cucumber (1 medium)',cal:24,protein:1,carbs:5,fat:0},
+  {name:'Boiled Sweet Potato (100g)',cal:86,protein:2,carbs:20,fat:0},
+  // Fast food & restaurant
+  {name:'Veg Burger',cal:400,protein:12,carbs:55,fat:15},
+  {name:'Chicken Burger',cal:500,protein:28,carbs:52,fat:22},
+  {name:'Veg Pizza (2 slices)',cal:480,protein:16,carbs:66,fat:18},
+  {name:'Chicken Pizza (2 slices)',cal:560,protein:26,carbs:64,fat:22},
+  {name:'French Fries (medium)',cal:380,protein:4,carbs:50,fat:18},
+  {name:'Pasta (1 bowl)',cal:420,protein:14,carbs:72,fat:10},
+  {name:'Fried Rice (1 cup)',cal:340,protein:8,carbs:58,fat:9},
+  {name:'Noodles (1 bowl)',cal:380,protein:10,carbs:68,fat:8},
+  {name:'Shawarma (chicken, 1)',cal:500,protein:28,carbs:48,fat:20},
+  {name:'Rolls (Kathi, veg, 1)',cal:360,protein:10,carbs:52,fat:13},
+  {name:'Momos (6 steamed)',cal:280,protein:10,carbs:42,fat:8},
+  {name:'Spring Rolls (4)',cal:350,protein:8,carbs:46,fat:15},
+  // Nuts & supplements
+  {name:'Cashews (30g)',cal:175,protein:5,carbs:10,fat:14},
+  {name:'Peanuts (30g)',cal:175,protein:8,carbs:5,fat:15},
+  {name:'Mixed Nuts (30g)',cal:185,protein:5,carbs:8,fat:16},
+  {name:'Protein Shake (homemade)',cal:200,protein:30,carbs:15,fat:4},
+  {name:'Banana Protein Shake',cal:320,protein:28,carbs:38,fat:5},
+  {name:'Peanut Butter Protein Shake',cal:380,protein:32,carbs:28,fat:14},
+  {name:'Mass Gainer (1 scoop)',cal:400,protein:25,carbs:70,fat:5},
+  {name:'BCAA Drink',cal:20,protein:5,carbs:0,fat:0},
+  // Desserts
+  {name:'Kheer (1 bowl)',cal:310,protein:8,carbs:50,fat:9},
+  {name:'Gulab Jamun (2)',cal:290,protein:4,carbs:50,fat:9},
+  {name:'Rasgulla (2)',cal:200,protein:4,carbs:44,fat:1},
+  {name:'Jalebi (50g)',cal:225,protein:2,carbs:50,fat:4},
+  {name:'Ice Cream (1 scoop)',cal:200,protein:3,carbs:26,fat:10},
+  {name:'Dark Chocolate (25g)',cal:140,protein:2,carbs:14,fat:9},
+  {name:'Brownie (1 piece)',cal:280,protein:4,carbs:40,fat:13},
 ];
 
 // ── USDA FoodData Central search (free, no CORS issues) ──────────────────
@@ -3290,6 +3437,13 @@ function CustomMealModal({ onSave, onClose }) {
                 </div>
               )}
             </div>
+          )}
+          {query.length > 1 && !pickedUSDA && localSuggestions.length === 0 && !showSuggestions && (
+            <button onClick={()=>{ setShowSuggestions(false); setForm(f=>({...f,name:query,cal:'',protein:'',carbs:'',fat:''})); }}
+              style={{width:'100%',marginTop:8,padding:'10px 14px',background:'#111',border:'1px dashed #3d3d3d',
+              borderRadius:12,color:'#a0a0a0',fontSize:13,cursor:'pointer',textAlign:'left'}}>
+              ✏️ Can't find "{query}"? Add it manually →
+            </button>
           )}
         </div>
 
@@ -4883,12 +5037,17 @@ function ProfileView({ profile, onUpdateProfile, pantry, onTogglePantry, showToa
           </div>
         </div>
         <div className="mb-3">
-          <label className="text-xs text-slate-400 mb-2 block">Goal</label>
+          <label className="text-xs text-slate-400 mb-2 block">Your Goals</label>
+          <p style={{fontSize:11,color:'#555',marginBottom:6}}>Pick all that apply</p>
           <div className="flex gap-2 flex-wrap">
-            {[['lose_fat','Lose Fat 🔥'],['build_muscle','Build Muscle 💪'],['fitness','Get Fitter 🏃'],['maintain','Maintain ⚖️']].map(([v,l])=>(
-              <button key={v} onClick={()=>up('goal',v)}
+            {[['lose_fat','Lose Fat 🔥'],['build_muscle','Build Muscle 💪'],['improve_fitness','Get Fitter 🏃'],['increase_stamina','More Stamina ⚡'],['flexibility','Flexibility 🧘'],['maintain','Maintain ⚖️']].map(([v,l])=>(
+              <button key={v} onClick={()=>{
+                const goals = form.goals || (form.goal ? [form.goal] : []);
+                const next = goals.includes(v) ? goals.filter(g=>g!==v) : [...goals,v];
+                up('goals', next);
+              }}
                 className="text-xs font-semibold px-3 py-1.5 rounded-xl"
-                style={{background:form.goal===v?'#ffffff':'var(--card)',color:form.goal===v?'#000':'var(--text2)',border:`1px solid ${form.goal===v?'#ffffff':'var(--border2)'}`}}>
+                style={{background:(form.goals||[form.goal]).includes(v)?'#ffffff':'var(--card)',color:(form.goals||[form.goal]).includes(v)?'#000':'var(--text2)',border:`1px solid ${(form.goals||[form.goal]).includes(v)?'#ffffff':'var(--border2)'}`}}>
                 {l}
               </button>
             ))}
@@ -5306,7 +5465,42 @@ function QuickLogSheet({ onClose, addWater, onLogActivity, onAddCustomMeal, show
                 </div>
               )}
             </div>
-            {mealForm && (
+            {mealQuery.length > 1 && !mealForm && (
+              <button onClick={()=>setMealForm({name:mealQuery,cal:0,protein:0,carbs:0,fat:0,_custom:true})}
+                style={{width:'100%',marginTop:8,padding:'10px 14px',background:'#111',border:'1px dashed #3d3d3d',
+                borderRadius:12,color:'#a0a0a0',fontSize:13,cursor:'pointer',textAlign:'left'}}>
+                ✏️ Can't find "{mealQuery}"? Add it manually →
+              </button>
+            )}
+            {mealForm && mealForm._custom && (
+              <div style={{background:'#111',borderRadius:14,padding:14,border:'1px solid #2a2a2a',marginTop:8}}>
+                <p style={{color:'#fff',fontWeight:700,margin:'0 0 12px',fontSize:14}}>Add: {mealForm.name}</p>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+                  <div>
+                    <label style={{fontSize:11,color:'#888',display:'block',marginBottom:4}}>Calories *</label>
+                    <input className="input-field" type="number" placeholder="e.g. 300"
+                      value={mealForm.cal||''} onChange={e=>setMealForm(f=>({...f,cal:+e.target.value}))}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:11,color:'#888',display:'block',marginBottom:4}}>Protein (g)</label>
+                    <input className="input-field" type="number" placeholder="e.g. 15"
+                      value={mealForm.protein||''} onChange={e=>setMealForm(f=>({...f,protein:+e.target.value}))}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:11,color:'#888',display:'block',marginBottom:4}}>Carbs (g)</label>
+                    <input className="input-field" type="number" placeholder="e.g. 40"
+                      value={mealForm.carbs||''} onChange={e=>setMealForm(f=>({...f,carbs:+e.target.value}))}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:11,color:'#888',display:'block',marginBottom:4}}>Fat (g)</label>
+                    <input className="input-field" type="number" placeholder="e.g. 8"
+                      value={mealForm.fat||''} onChange={e=>setMealForm(f=>({...f,fat:+e.target.value}))}/>
+                  </div>
+                </div>
+                <p style={{fontSize:10,color:'#555',margin:'0 0 10px'}}>Only calories required — macros optional</p>
+              </div>
+            )}
+            {mealForm && !mealForm._custom && (
               <div className="rounded-2xl p-3 mb-3" style={{background:'rgba(34,197,94,0.08)',border:'1px solid rgba(34,197,94,0.2)'}}>
                 <p className="text-xs font-semibold mb-2" style={{color:'#22c55e'}}>
                   ✓ {mealForm.name}{mealForm.isUSDA?' · per 100g (USDA)':''}
